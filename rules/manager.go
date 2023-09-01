@@ -1241,20 +1241,20 @@ func (m *Manager) loadRulesFromDatabase(groups map[string]*Group, shouldRestore 
 		//填充自定义Lable
 		for _, v := range v.Labels {
 			extraLabel = append(extraLabel, labels.Label{
-				v["key"], v["value"],
+				Name: v["key"], Value: v["value"],
 			})
 		}
 
-		var extraAnotations = labels.Labels{}
+		var extraAnnotations = labels.Labels{}
 		for _, v := range v.Annotations {
-			extraAnotations = append(extraAnotations, labels.Label{
-				v["key"], v["value"],
+			extraAnnotations = append(extraAnnotations, labels.Label{
+				Name: v["key"], Value: v["value"],
 			})
 		}
 
 		extraRules[v.Group] = append(extraRules[v.Group], NewAlertingRule(
 			v.Alert, expr, v.For, v.KeepFiringFor,
-			extraLabel, extraAnotations, nil,
+			extraLabel, extraAnnotations, labels.Labels{},
 			"", shouldRestore,
 			log.With(m.logger, "alert", v.Alert)))
 	}
