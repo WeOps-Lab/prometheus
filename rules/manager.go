@@ -1232,7 +1232,7 @@ func (m *Manager) loadRulesFromDatabase(groups map[string]*Group, shouldRestore 
 			continue
 		}
 
-		var extraLabel []labels.Label
+		var extraLabel labels.Labels
 		extraLabel = append(extraLabel, labels.Label{
 			Name:  "weops",
 			Value: v.Group,
@@ -1245,7 +1245,7 @@ func (m *Manager) loadRulesFromDatabase(groups map[string]*Group, shouldRestore 
 			})
 		}
 
-		var extraAnnotations []labels.Label
+		var extraAnnotations labels.Labels
 		for _, v := range v.Annotations {
 			extraAnnotations = append(extraAnnotations, labels.Label{
 				Name: v["key"], Value: v["value"],
