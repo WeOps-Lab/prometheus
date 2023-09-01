@@ -1254,7 +1254,7 @@ func (m *Manager) loadRulesFromDatabase(groups map[string]*Group, shouldRestore 
 
 		extraRules[v.Group] = append(extraRules[v.Group], NewAlertingRule(
 			v.Alert, expr, v.For, v.KeepFiringFor,
-			extraLabel, extraAnnotations, labels.EmptyLabels(),
+			labels.New(extraLabel...), labels.New(extraAnnotations...), labels.EmptyLabels(),
 			"", shouldRestore,
 			log.With(m.logger, "alert", v.Alert)))
 	}
