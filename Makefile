@@ -119,15 +119,8 @@ plugins/plugins.go: plugins.yml plugins/generate.go
 .PHONY: plugins
 plugins: plugins/plugins.go
 
-weops-build:
-	go mod tidy
-	go mod vendor
-	go build ./cmd/prometheus
-	go build ./cmd/promtool
-
 .PHONY: build
-build: assets npm_licenses assets-compress plugins weops-build
-#common-build
+build: assets npm_licenses assets-compress plugins common-build
 
 .PHONY: bench_tsdb
 bench_tsdb: $(PROMU)
