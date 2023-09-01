@@ -1232,29 +1232,29 @@ func (m *Manager) loadRulesFromDatabase(groups map[string]*Group, shouldRestore 
 			continue
 		}
 
-		var extraLabel labels.Labels
-		extraLabel = append(extraLabel, labels.Label{
-			Name:  "weops",
-			Value: v.Group,
-		})
-
+		extraLabel := labels.Labels{
+			labels.Label{
+				Name:  "weops",
+				Value: v.Group,
+			},
+		}
 		//填充自定义Lable
 		for _, v := range v.Labels {
 			extraLabel = append(extraLabel, labels.Label{
-				Name: v["key"], Value: v["value"],
+				v["key"], v["value"],
 			})
 		}
 
-		var extraAnnotations labels.Labels
+		extraAnnotations := labels.Labels{}
 		for _, v := range v.Annotations {
 			extraAnnotations = append(extraAnnotations, labels.Label{
-				Name: v["key"], Value: v["value"],
+				v["key"], v["value"],
 			})
 		}
 
 		extraRules[v.Group] = append(extraRules[v.Group], NewAlertingRule(
 			v.Alert, expr, v.For, v.KeepFiringFor,
-			extraLabel, extraAnnotations, labels.Labels{},
+			extraLabel, extraAnnotations, nil,
 			"", shouldRestore,
 			log.With(m.logger, "alert", v.Alert)))
 	}
