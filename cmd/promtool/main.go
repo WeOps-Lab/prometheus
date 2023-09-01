@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jinzhu/gorm"
+	"github.com/prometheus/prometheus/dao"
 	"io"
 	"math"
 	"net/http"
@@ -147,6 +149,9 @@ func main() {
 	queryCmd := app.Command("query", "Run query against a Prometheus server.")
 	queryCmdFmt := queryCmd.Flag("format", "Output format of the query.").Short('o').Default("promql").Enum("promql", "json")
 	queryCmd.Flag("http.config.file", "HTTP client configuration file for promtool to connect to Prometheus.").PlaceHolder("<filename>").ExistingFileVar(&httpConfigFilePath)
+
+	migrateDataBaseCmd := app.Command("migrate", "Migrate Schema to Database.")
+	migrateDataBaseDsn := migrateDataBaseCmd.Flag("dsn", "Database DSN").Required().String()
 
 	queryInstantCmd := queryCmd.Command("instant", "Run instant query.")
 	queryInstantCmd.Arg("server", "Prometheus server to query.").Required().URLVar(&serverURL)
@@ -341,6 +346,9 @@ func main() {
 
 	case queryRangeCmd.FullCommand():
 		os.Exit(QueryRange(serverURL, httpRoundTripper, *queryRangeHeaders, *queryRangeExpr, *queryRangeBegin, *queryRangeEnd, *queryRangeStep, p))
+
+	case migrateDataBaseCmd.FullCommand():
+		os.Exit(MigrateDataBase(*migrateDataBaseDsn))
 
 	case querySeriesCmd.FullCommand():
 		os.Exit(QuerySeries(serverURL, httpRoundTripper, *querySeriesMatch, *querySeriesBegin, *querySeriesEnd, p))
@@ -1007,6 +1015,27 @@ func QueryInstant(url *url.URL, roundTripper http.RoundTripper, query, evalTime 
 	}
 
 	p.printValue(val)
+
+	return successExitCode
+}
+
+func MigrateDataBase(dsn string) int {
+	db, err := gorm.Open("mysql", dsn)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: ", err)
+		return failureExitCode
+	}
+
+	defer func(db *gorm.DB) {
+		err := db.Close()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error: ", err)
+		}
+	}(db)
+
+	db.AutoMigrate(&dao.AlertRule{})
+	db.AutoMigrate(&dao.ScrapeGroup{})
+	db.AutoMigrate(&dao.ScrapeTarget{})
 
 	return successExitCode
 }

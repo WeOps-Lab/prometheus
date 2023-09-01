@@ -19,6 +19,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jinzhu/gorm"
+	config_util "github.com/prometheus/common/config"
+	"github.com/prometheus/prometheus/dao"
 	"math"
 	"math/bits"
 	"net"
@@ -1223,6 +1226,93 @@ type reloader struct {
 	reloader func(*config.Config) error
 }
 
+func loadScrapeTargetFromDatabase(conf *config.Config, logger log.Logger) {
+	dsn := os.Getenv("BACKEND_DSN")
+	if dsn == "" {
+		level.Error(logger).Log("msg", "BACKEND_DSN is not set")
+		return
+	}
+
+	db, err := gorm.Open("mysql", dsn)
+	defer func(db *gorm.DB) {
+		err := db.Close()
+		if err != nil {
+			level.Error(logger).Log("msg", "close db error", "err", err)
+		}
+	}(db)
+	if err != nil {
+		level.Error(logger).Log("msg", "open db error", "err", err)
+		return
+	}
+
+	var groups []dao.ScrapeGroup
+	err = db.Model(&dao.ScrapeGroup{}).Find(&groups).Error
+	if err != nil {
+		level.Error(logger).Log("msg", "find scrape group error", "err", err)
+		return
+	}
+
+	for _, group := range groups {
+		var scrapeTarget []dao.ScrapeTarget
+		err = db.Model(&dao.ScrapeTarget{}).Where("group_id = ?", group.ID).Find(&scrapeTarget).Error
+		if err != nil {
+			level.Error(logger).Log("msg", "find scrape target error", "err", err)
+			continue
+		}
+		var targetGroups = []*targetgroup.Group{}
+		for _, target := range scrapeTarget {
+			var labels model.LabelSet = map[model.LabelName]model.LabelValue{}
+			for _, label := range group.Labels {
+				key := model.LabelName(label["key"])
+				value := model.LabelValue(label["value"])
+				labels[key] = value
+			}
+
+			for _, label := range target.Labels {
+				key := model.LabelName(label["key"])
+				value := model.LabelValue(label["value"])
+				labels[key] = value
+			}
+
+			targetGroups = append(targetGroups, &targetgroup.Group{
+				Targets: []model.LabelSet{
+					{
+						"__address__": model.LabelValue(target.Target),
+					},
+				},
+				Labels: labels,
+				Source: fmt.Sprint(target.ID),
+			})
+		}
+
+		scrapeConfig := &config.ScrapeConfig{
+			JobName:        group.Name,
+			Scheme:         group.Scheme,
+			ScrapeInterval: model.Duration(time.Duration(group.Interval) * time.Second),
+			ScrapeTimeout:  model.Duration(time.Duration(group.Timeout) * time.Second),
+			MetricsPath:    group.MetricsPath,
+			HTTPClientConfig: config_util.HTTPClientConfig{
+				TLSConfig: config_util.TLSConfig{
+					InsecureSkipVerify: true,
+				},
+			},
+			ServiceDiscoveryConfigs: discovery.Configs{discovery.StaticConfig(targetGroups)},
+		}
+
+		if group.AuthUser != "" && group.AuthPassword != "" {
+			scrapeConfig.HTTPClientConfig.BasicAuth = &config_util.BasicAuth{
+				Username: group.AuthUser,
+				Password: config_util.Secret(group.AuthPassword),
+			}
+		} else if group.AuthToken != "" {
+			scrapeConfig.HTTPClientConfig.BearerToken = config_util.Secret(group.AuthToken)
+		}
+
+		// log scrape target number load from database
+		conf.ScrapeConfigs = append(conf.ScrapeConfigs, scrapeConfig)
+		level.Info(logger).Log("msg", "load scrape target number", "number", len(targetGroups), "from database")
+	}
+}
 func reloadConfig(filename string, expandExternalLabels, enableExemplarStorage bool, logger log.Logger, noStepSuqueryInterval *safePromQLNoStepSubqueryInterval, rls ...reloader) (err error) {
 	start := time.Now()
 	timings := []interface{}{}
@@ -1238,6 +1328,9 @@ func reloadConfig(filename string, expandExternalLabels, enableExemplarStorage b
 	}()
 
 	conf, err := config.LoadFile(filename, agentMode, expandExternalLabels, logger)
+
+	loadScrapeTargetFromDatabase(conf, logger)
+
 	if err != nil {
 		return fmt.Errorf("couldn't load configuration (--config.file=%q): %w", filename, err)
 	}

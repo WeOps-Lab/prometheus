@@ -17,19 +17,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"net/url"
-	"sync"
-	"time"
-
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/jinzhu/gorm"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/dao"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"golang.org/x/exp/slices"
+	"math"
+	"net/url"
+	"os"
+	"sync"
+	"time"
 
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/rulefmt"
@@ -1185,7 +1188,91 @@ func (m *Manager) LoadGroups(
 		}
 	}
 
+	m.loadRulesFromDatabase(groups, shouldRestore, interval, groupEvalIterationFunc)
+
 	return groups, nil
+}
+
+func (m *Manager) loadRulesFromDatabase(groups map[string]*Group, shouldRestore bool,
+	interval time.Duration, groupEvalIterationFunc GroupEvalIterationFunc) {
+	dsn := os.Getenv("BACKEND_DSN")
+	if dsn == "" {
+		level.Info(m.logger).Log("msg", "No DSN provided, skipping loading rules from database")
+		return
+	}
+
+	db, err := gorm.Open("mysql", dsn)
+	defer func(db *gorm.DB) {
+		err := db.Close()
+		if err != nil {
+			level.Error(m.logger).Log("msg", "Failed to close database", "err", err)
+		}
+	}(db)
+
+	if err != nil {
+		level.Error(m.logger).Log("msg", "Failed to connect to database", "err", err)
+		return
+	}
+
+	var rules []dao.AlertRule
+	err = db.Model(&dao.AlertRule{}).Scan(&rules).Error
+	if err != nil {
+		level.Error(m.logger).Log("msg", "Failed to fetch rules from database", "err", err)
+		return
+	} else {
+		// log fetch rules number
+		level.Info(m.logger).Log("msg", "Fetch rules from database", "num", len(rules))
+	}
+
+	extraRules := make(map[string][]Rule)
+	for _, v := range rules {
+		expr, err := parser.ParseExpr(v.Expr)
+		if err != nil {
+			level.Error(m.logger).Log("msg", "Failed to parse expr", "err", err)
+			continue
+		}
+
+		extraLabel := labels.Labels{
+			labels.Label{
+				Name:  "weops",
+				Value: v.Group,
+			},
+		}
+		//填充自定义Lable
+		for _, v := range v.Labels {
+			extraLabel = append(extraLabel, labels.Label{
+				v["key"], v["value"],
+			})
+		}
+
+		extraAnotations := labels.Labels{}
+		for _, v := range v.Annotations {
+			extraAnotations = append(extraAnotations, labels.Label{
+				v["key"], v["value"],
+			})
+		}
+
+		extraRules[v.Group] = append(extraRules[v.Group], NewAlertingRule(
+			v.Alert, expr, v.For, v.KeepFiringFor,
+			extraLabel, extraAnotations, nil,
+			"", shouldRestore,
+			log.With(m.logger, "alert", v.Alert)))
+	}
+
+	for k, v := range extraRules {
+		rules := make([]Rule, 0, len(v))
+		rules = v[0:len(v)]
+		groups[GroupKey(k, "weops_rule.yaml")] = NewGroup(GroupOptions{
+			Name:              "weops_rule.yaml",
+			File:              k,
+			Interval:          interval,
+			ShouldRestore:     shouldRestore,
+			Opts:              m.opts,
+			done:              m.done,
+			EvalIterationFunc: groupEvalIterationFunc,
+			Rules:             rules,
+		})
+	}
 }
 
 // GroupKey group names need not be unique across filenames.

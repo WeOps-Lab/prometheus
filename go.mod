@@ -22,6 +22,7 @@ require (
 	github.com/go-kit/log v0.2.1
 	github.com/go-logfmt/logfmt v0.6.0
 	github.com/go-openapi/strfmt v0.21.7
+	github.com/go-sql-driver/mysql v1.5.0
 	github.com/go-zookeeper/zk v1.0.3
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v0.0.4
@@ -33,6 +34,7 @@ require (
 	github.com/hashicorp/nomad/api v0.0.0-20230718173136-3a687930bd3e
 	github.com/hetznercloud/hcloud-go/v2 v2.0.0
 	github.com/ionos-cloud/sdk-go/v6 v6.1.8
+	github.com/jinzhu/gorm v1.9.16
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.16.7
 	github.com/kolo/xmlrpc v0.0.0-20220921171641-a4b6fa1dd06b
@@ -94,6 +96,7 @@ require (
 	github.com/google/s2a-go v0.1.4 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
+	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 // indirect
 	github.com/stretchr/objx v0.5.0 // indirect
