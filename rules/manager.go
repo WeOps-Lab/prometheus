@@ -1237,6 +1237,7 @@ func (m *Manager) loadRulesFromDatabase(groups map[string]*Group, shouldRestore 
 			Name:  "weops",
 			Value: v.Group,
 		})
+
 		//填充自定义Lable
 		for _, v := range v.Labels {
 			extraLabel = append(extraLabel, labels.Label{
