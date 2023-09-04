@@ -220,11 +220,36 @@ func (c *flagConfig) setFeatureListOptions(logger log.Logger) error {
 	return nil
 }
 
+func MigrateDataBase() {
+	if os.Getenv("BACKEND_DSN") != "" {
+		dsn := os.Getenv("BACKEND_DSN")
+		db, err := gorm.Open("mysql", dsn)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error: ", err)
+			panic(err)
+		}
+
+		defer func(db *gorm.DB) {
+			err := db.Close()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "error: ", err)
+			}
+		}(db)
+
+		db.AutoMigrate(&dao.AlertRule{})
+		db.AutoMigrate(&dao.ScrapeGroup{})
+		db.AutoMigrate(&dao.ScrapeTarget{})
+	}
+}
+
 func main() {
+
 	if os.Getenv("DEBUG") != "" {
 		runtime.SetBlockProfileRate(20)
 		runtime.SetMutexProfileFraction(20)
 	}
+
+	MigrateDataBase()
 
 	var (
 		oldFlagRetentionDuration model.Duration
