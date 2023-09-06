@@ -17,11 +17,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jinzhu/gorm"
-	config_util "github.com/prometheus/common/config"
-	"github.com/prometheus/prometheus/dao"
+	"io"
 	"math"
 	"math/bits"
 	"net"
@@ -36,6 +35,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	config_util "github.com/prometheus/common/config"
+	"github.com/prometheus/prometheus/dao"
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/alecthomas/units"
@@ -220,36 +222,12 @@ func (c *flagConfig) setFeatureListOptions(logger log.Logger) error {
 	return nil
 }
 
-func MigrateDataBase() {
-	if os.Getenv("BACKEND_DSN") != "" {
-		dsn := os.Getenv("BACKEND_DSN")
-		db, err := gorm.Open("mysql", dsn)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error: ", err)
-			panic(err)
-		}
-
-		defer func(db *gorm.DB) {
-			err := db.Close()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "error: ", err)
-			}
-		}(db)
-
-		db.AutoMigrate(&dao.AlertRule{})
-		db.AutoMigrate(&dao.ScrapeGroup{})
-		db.AutoMigrate(&dao.ScrapeTarget{})
-	}
-}
-
 func main() {
 
 	if os.Getenv("DEBUG") != "" {
 		runtime.SetBlockProfileRate(20)
 		runtime.SetMutexProfileFraction(20)
 	}
-
-	MigrateDataBase()
 
 	var (
 		oldFlagRetentionDuration model.Duration
@@ -1251,41 +1229,37 @@ type reloader struct {
 	reloader func(*config.Config) error
 }
 
-func loadScrapeTargetFromDatabase(conf *config.Config, logger log.Logger) {
-	dsn := os.Getenv("BACKEND_DSN")
-	if dsn == "" {
-		level.Error(logger).Log("msg", "BACKEND_DSN is not set")
+// 从指定URL获取json数据，反序列化到dao.ScrapeGroup,并更新Prometheus的告警规则
+func loadScrapeTargetFromUrl(conf *config.Config, logger log.Logger) {
+	url := os.Getenv("EXTRA_SCRAPE_TARGET")
+	if url == "" {
+		level.Error(logger).Log("msg", "EXTRA_SCRAPE_TARGET is not set")
 		return
 	}
 
-	db, err := gorm.Open("mysql", dsn)
-	defer func(db *gorm.DB) {
-		err := db.Close()
-		if err != nil {
-			level.Error(logger).Log("msg", "close db error", "err", err)
-		}
-	}(db)
+	resp, err := http.Get(url)
 	if err != nil {
-		level.Error(logger).Log("msg", "open db error", "err", err)
+		level.Error(logger).Log("msg", "get url error", "err", err)
 		return
 	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			level.Error(logger).Log("msg", "close body error", "err", err)
+		}
+	}(resp.Body)
 
 	var groups []dao.ScrapeGroup
-	err = db.Model(&dao.ScrapeGroup{}).Find(&groups).Error
+	err = json.NewDecoder(resp.Body).Decode(&groups)
 	if err != nil {
-		level.Error(logger).Log("msg", "find scrape group error", "err", err)
+		level.Error(logger).Log("msg", "decode json error", "err", err)
 		return
 	}
 
 	for _, group := range groups {
-		var scrapeTarget []dao.ScrapeTarget
-		err = db.Model(&dao.ScrapeTarget{}).Where("group_id = ?", group.ID).Find(&scrapeTarget).Error
-		if err != nil {
-			level.Error(logger).Log("msg", "find scrape target error", "err", err)
-			continue
-		}
+		// 循环group中的ScrapeTarget数组
 		var targetGroups = []*targetgroup.Group{}
-		for _, target := range scrapeTarget {
+		for _, target := range group.ScrapeTarget {
 			var labels model.LabelSet = map[model.LabelName]model.LabelValue{}
 			for _, label := range group.Labels {
 				key := model.LabelName(label["key"])
@@ -1333,11 +1307,11 @@ func loadScrapeTargetFromDatabase(conf *config.Config, logger log.Logger) {
 			scrapeConfig.HTTPClientConfig.BearerToken = config_util.Secret(group.AuthToken)
 		}
 
-		// log scrape target number load from database
 		conf.ScrapeConfigs = append(conf.ScrapeConfigs, scrapeConfig)
-		level.Info(logger).Log("msg", "load scrape target number", "number", len(targetGroups), "from database")
+		level.Info(logger).Log("msg", "load scrape target number", "number", len(targetGroups), "from url")
 	}
 }
+
 func reloadConfig(filename string, expandExternalLabels, enableExemplarStorage bool, logger log.Logger, noStepSuqueryInterval *safePromQLNoStepSubqueryInterval, rls ...reloader) (err error) {
 	start := time.Now()
 	timings := []interface{}{}
@@ -1354,7 +1328,7 @@ func reloadConfig(filename string, expandExternalLabels, enableExemplarStorage b
 
 	conf, err := config.LoadFile(filename, agentMode, expandExternalLabels, logger)
 
-	loadScrapeTargetFromDatabase(conf, logger)
+	loadScrapeTargetFromUrl(conf, logger)
 
 	if err != nil {
 		return fmt.Errorf("couldn't load configuration (--config.file=%q): %w", filename, err)

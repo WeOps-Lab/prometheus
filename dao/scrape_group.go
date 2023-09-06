@@ -1,24 +1,17 @@
 package dao
 
-import "time"
-
 type ScrapeGroup struct {
-	ID        uint      `gorm:"primary_key"`
-	CreatedAt time.Time `json:"create_at"`
-	UpdatedAt time.Time `json:"update_at"`
+	ID           string `json:"id,omitempty"`
+	Name         string `json:"name,omitempty"`
+	MetricsPath  string `json:"metricsPath,omitempty"`
+	Labels       JSON   `json:"labels,omitempty"`
+	Scheme       string `json:"scheme,omitempty"`
+	Interval     int    `json:"interval,omitempty"`
+	Timeout      int    `json:"timeout,omitempty"`
+	Describe     string `json:"describe,omitempty"`
+	AuthUser     string `json:"authUser,omitempty"`
+	AuthPassword string `json:"authPassword,omitempty"`
+	AuthToken    string `json:"authToken,omitempty"`
 
-	Name         string `gorm:"type:varchar(200);not null" json:"name"`
-	MetricsPath  string `gorm:"type:varchar(200);not null" json:"metrics_path"`
-	Labels       JSON   `sql:"type:json" json:"labels"`
-	Scheme       string `gorm:"type:varchar(200);not null" json:"scheme"`
-	Interval     int    `gorm:"type:integer;not null" json:"interval"`
-	Timeout      int    `gorm:"type:integer;not null" json:"timeout"`
-	Describe     string `gorm:"type:varchar(200)" json:"describe"`
-	AuthUser     string `gorm:"type:varchar(200)" json:"auth_user"`
-	AuthPassword string `gorm:"type:varchar(200)" json:"auth_password"`
-	AuthToken    string `gorm:"type:varchar(200)" json:"auth_token"`
-}
-
-func (self *ScrapeGroup) TableName() string {
-	return "scrape_group"
+	ScrapeTarget []ScrapeTarget `json:"scrapeTarget,omitempty"`
 }
