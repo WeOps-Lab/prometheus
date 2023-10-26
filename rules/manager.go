@@ -21,13 +21,13 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strings"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/dao"
@@ -495,9 +495,11 @@ func (g *Group) AlertingRules() []*AlertingRule {
 			alerts = append(alerts, alertingRule)
 		}
 	}
-	slices.SortFunc(alerts, func(a, b *AlertingRule) bool {
-		return a.State() > b.State() ||
-			(a.State() == b.State() && a.Name() < b.Name())
+	slices.SortFunc(alerts, func(a, b *AlertingRule) int {
+		if a.State() == b.State() {
+			return strings.Compare(a.Name(), b.Name())
+		}
+		return int(b.State() - a.State())
 	})
 	return alerts
 }
@@ -819,7 +821,7 @@ func (g *Group) RestoreForState(ts time.Time) {
 	// We allow restoration only if alerts were active before after certain time.
 	mint := ts.Add(-g.opts.OutageTolerance)
 	mintMS := int64(model.TimeFromUnixNano(mint.UnixNano()))
-	q, err := g.opts.Queryable.Querier(g.opts.Context, mintMS, maxtMS)
+	q, err := g.opts.Queryable.Querier(mintMS, maxtMS)
 	if err != nil {
 		level.Error(g.logger).Log("msg", "Failed to get Querier", "err", err)
 		return
@@ -848,7 +850,7 @@ func (g *Group) RestoreForState(ts time.Time) {
 		alertRule.ForEachActiveAlert(func(a *Alert) {
 			var s storage.Series
 
-			s, err := alertRule.QueryforStateSeries(a, q)
+			s, err := alertRule.QueryforStateSeries(g.opts.Context, a, q)
 			if err != nil {
 				// Querier Warnings are ignored. We do not care unless we have an error.
 				level.Error(g.logger).Log(
@@ -1286,11 +1288,15 @@ func (m *Manager) RuleGroups() []*Group {
 		rgs = append(rgs, g)
 	}
 
-	slices.SortFunc(rgs, func(a, b *Group) bool {
-		if a.file != b.file {
-			return a.file < b.file
+	slices.SortFunc(rgs, func(a, b *Group) int {
+		fileCompare := strings.Compare(a.file, b.file)
+
+		// If its 0, then the file names are the same.
+		// Lets look at the group names in that case.
+		if fileCompare != 0 {
+			return fileCompare
 		}
-		return a.name < b.name
+		return strings.Compare(a.name, b.name)
 	})
 
 	return rgs

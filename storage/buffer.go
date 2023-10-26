@@ -42,7 +42,6 @@ func NewBuffer(delta int64) *BufferedSeriesIterator {
 // NewBufferIterator returns a new iterator that buffers the values within the
 // time range of the current element and the duration of delta before.
 func NewBufferIterator(it chunkenc.Iterator, delta int64) *BufferedSeriesIterator {
-	// TODO(codesome): based on encoding, allocate different buffer.
 	bit := &BufferedSeriesIterator{
 		buf:   newSampleRing(delta, 0, chunkenc.ValNone),
 		delta: delta,
@@ -92,12 +91,8 @@ func (b *BufferedSeriesIterator) Seek(t int64) chunkenc.ValueType {
 		switch b.valueType {
 		case chunkenc.ValNone:
 			return chunkenc.ValNone
-		case chunkenc.ValFloat:
-			b.lastTime, _ = b.At()
-		case chunkenc.ValHistogram:
-			b.lastTime, _ = b.AtHistogram()
-		case chunkenc.ValFloatHistogram:
-			b.lastTime, _ = b.AtFloatHistogram()
+		case chunkenc.ValFloat, chunkenc.ValHistogram, chunkenc.ValFloatHistogram:
+			b.lastTime = b.AtT()
 		default:
 			panic(fmt.Errorf("BufferedSeriesIterator: unknown value type %v", b.valueType))
 		}

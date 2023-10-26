@@ -2619,7 +2619,9 @@ func TestTargetScraperScrapeOK(t *testing.T) {
 		}
 		var buf bytes.Buffer
 
-		contentType, err := ts.scrape(context.Background(), &buf)
+		resp, err := ts.scrape(context.Background())
+		require.NoError(t, err)
+		contentType, err := ts.readResponse(context.Background(), resp, &buf)
 		require.NoError(t, err)
 		require.Equal(t, "text/plain; version=0.0.4", contentType)
 		require.Equal(t, "metric_a 1\nmetric_b 2\n", buf.String())
@@ -2665,7 +2667,7 @@ func TestTargetScrapeScrapeCancel(t *testing.T) {
 	}()
 
 	go func() {
-		_, err := ts.scrape(ctx, io.Discard)
+		_, err := ts.scrape(ctx)
 		switch {
 		case err == nil:
 			errc <- errors.New("Expected error but got nil")
@@ -2711,7 +2713,9 @@ func TestTargetScrapeScrapeNotFound(t *testing.T) {
 		acceptHeader: scrapeAcceptHeader,
 	}
 
-	_, err = ts.scrape(context.Background(), io.Discard)
+	resp, err := ts.scrape(context.Background())
+	require.NoError(t, err)
+	_, err = ts.readResponse(context.Background(), resp, io.Discard)
 	require.Contains(t, err.Error(), "404", "Expected \"404 NotFound\" error but got: %s", err)
 }
 
@@ -2755,26 +2759,34 @@ func TestTargetScraperBodySizeLimit(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Target response uncompressed body, scrape with body size limit.
-	_, err = ts.scrape(context.Background(), &buf)
+	resp, err := ts.scrape(context.Background())
+	require.NoError(t, err)
+	_, err = ts.readResponse(context.Background(), resp, &buf)
 	require.ErrorIs(t, err, errBodySizeLimit)
 	require.Equal(t, bodySizeLimit, buf.Len())
 	// Target response gzip compressed body, scrape with body size limit.
 	gzipResponse = true
 	buf.Reset()
-	_, err = ts.scrape(context.Background(), &buf)
+	resp, err = ts.scrape(context.Background())
+	require.NoError(t, err)
+	_, err = ts.readResponse(context.Background(), resp, &buf)
 	require.ErrorIs(t, err, errBodySizeLimit)
 	require.Equal(t, bodySizeLimit, buf.Len())
 	// Target response uncompressed body, scrape without body size limit.
 	gzipResponse = false
 	buf.Reset()
 	ts.bodySizeLimit = 0
-	_, err = ts.scrape(context.Background(), &buf)
+	resp, err = ts.scrape(context.Background())
+	require.NoError(t, err)
+	_, err = ts.readResponse(context.Background(), resp, &buf)
 	require.NoError(t, err)
 	require.Equal(t, len(responseBody), buf.Len())
 	// Target response gzip compressed body, scrape without body size limit.
 	gzipResponse = true
 	buf.Reset()
-	_, err = ts.scrape(context.Background(), &buf)
+	resp, err = ts.scrape(context.Background())
+	require.NoError(t, err)
+	_, err = ts.readResponse(context.Background(), resp, &buf)
 	require.NoError(t, err)
 	require.Equal(t, len(responseBody), buf.Len())
 }
@@ -2802,7 +2814,11 @@ func (ts *testScraper) Report(start time.Time, duration time.Duration, err error
 	ts.lastError = err
 }
 
-func (ts *testScraper) scrape(ctx context.Context, w io.Writer) (string, error) {
+func (ts *testScraper) scrape(ctx context.Context) (*http.Response, error) {
+	return nil, ts.scrapeErr
+}
+
+func (ts *testScraper) readResponse(ctx context.Context, resp *http.Response, w io.Writer) (string, error) {
 	if ts.scrapeFunc != nil {
 		return "", ts.scrapeFunc(ctx, w)
 	}
@@ -2925,9 +2941,9 @@ func TestScrapeLoopDiscardDuplicateLabels(t *testing.T) {
 	require.Error(t, err)
 	require.NoError(t, slApp.Rollback())
 
-	q, err := s.Querier(ctx, time.Time{}.UnixNano(), 0)
+	q, err := s.Querier(time.Time{}.UnixNano(), 0)
 	require.NoError(t, err)
-	series := q.Select(false, nil, labels.MustNewMatcher(labels.MatchRegexp, "__name__", ".*"))
+	series := q.Select(ctx, false, nil, labels.MustNewMatcher(labels.MatchRegexp, "__name__", ".*"))
 	require.Equal(t, false, series.Next(), "series found in tsdb")
 	require.NoError(t, series.Err())
 
@@ -2937,9 +2953,9 @@ func TestScrapeLoopDiscardDuplicateLabels(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, slApp.Commit())
 
-	q, err = s.Querier(ctx, time.Time{}.UnixNano(), 0)
+	q, err = s.Querier(time.Time{}.UnixNano(), 0)
 	require.NoError(t, err)
-	series = q.Select(false, nil, labels.MustNewMatcher(labels.MatchEqual, "le", "500"))
+	series = q.Select(ctx, false, nil, labels.MustNewMatcher(labels.MatchEqual, "le", "500"))
 	require.Equal(t, true, series.Next(), "series not found in tsdb")
 	require.NoError(t, series.Err())
 	require.Equal(t, false, series.Next(), "more than one series found in tsdb")
@@ -2984,9 +3000,9 @@ func TestScrapeLoopDiscardUnnamedMetrics(t *testing.T) {
 	require.NoError(t, slApp.Rollback())
 	require.Equal(t, errNameLabelMandatory, err)
 
-	q, err := s.Querier(ctx, time.Time{}.UnixNano(), 0)
+	q, err := s.Querier(time.Time{}.UnixNano(), 0)
 	require.NoError(t, err)
-	series := q.Select(false, nil, labels.MustNewMatcher(labels.MatchRegexp, "__name__", ".*"))
+	series := q.Select(ctx, false, nil, labels.MustNewMatcher(labels.MatchRegexp, "__name__", ".*"))
 	require.Equal(t, false, series.Next(), "series found in tsdb")
 	require.NoError(t, series.Err())
 }
@@ -3346,9 +3362,9 @@ func TestScrapeReportSingleAppender(t *testing.T) {
 
 	start := time.Now()
 	for time.Since(start) < 3*time.Second {
-		q, err := s.Querier(ctx, time.Time{}.UnixNano(), time.Now().UnixNano())
+		q, err := s.Querier(time.Time{}.UnixNano(), time.Now().UnixNano())
 		require.NoError(t, err)
-		series := q.Select(false, nil, labels.MustNewMatcher(labels.MatchRegexp, "__name__", ".+"))
+		series := q.Select(ctx, false, nil, labels.MustNewMatcher(labels.MatchRegexp, "__name__", ".+"))
 
 		c := 0
 		for series.Next() {
@@ -3418,10 +3434,10 @@ func TestScrapeReportLimit(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	q, err := s.Querier(ctx, time.Time{}.UnixNano(), time.Now().UnixNano())
+	q, err := s.Querier(time.Time{}.UnixNano(), time.Now().UnixNano())
 	require.NoError(t, err)
 	defer q.Close()
-	series := q.Select(false, nil, labels.MustNewMatcher(labels.MatchRegexp, "__name__", "up"))
+	series := q.Select(ctx, false, nil, labels.MustNewMatcher(labels.MatchRegexp, "__name__", "up"))
 
 	var found bool
 	for series.Next() {
